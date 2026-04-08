@@ -19,7 +19,7 @@ HF_TOKEN     = os.environ.get("HF_TOKEN",      "")
 ENV_BASE_URL = os.environ.get("ENV_BASE_URL",  "http://localhost:7860")
 MAX_STEPS    = int(os.environ.get("MAX_STEPS", "30"))
 
-# ── OpenAI client (REQUIRED by hackathon ) ──
+# ── OpenAI client (REQUIRED by hackathon — do not use httpx for LLM calls) ──
 llm_client = OpenAI(base_url=API_BASE_URL, api_key=HF_TOKEN)
 
 SYSTEM_PROMPT = """You are an AI agent managing a student's focus session.
@@ -111,8 +111,11 @@ def run_episode(task_id: str, episode_num: int):
         # [STEP] marker
         print(f"[STEP] step={step} reward={reward}", flush=True)
 
+    # Clamp score strictly inside (0, 1)
+    safe_score = max(1e-6, min(total_reward, 1 - 1e-6))
+
     # [END] marker
-    print(f"[END] task={task_id} score={total_reward} steps={step}", flush=True)
+    print(f"[END] task={task_id} score={safe_score} steps={step}", flush=True)
 
     return {
         "episode":      episode_num,
