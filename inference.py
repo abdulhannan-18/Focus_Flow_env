@@ -19,7 +19,7 @@ HF_TOKEN     = os.environ.get("HF_TOKEN",      "")
 ENV_BASE_URL = os.environ.get("ENV_BASE_URL",  "http://localhost:7860")
 MAX_STEPS    = int(os.environ.get("MAX_STEPS", "30"))
 
-# ── OpenAI client (REQUIRED by hackathon — do not use httpx for LLM calls) ──
+# ── OpenAI client (REQUIRED by hackathon ) ──
 llm_client = OpenAI(base_url=API_BASE_URL, api_key=HF_TOKEN)
 
 SYSTEM_PROMPT = """You are an AI agent managing a student's focus session.
@@ -47,7 +47,6 @@ Strategy:
 4. NEVER use check_app.
 """
 
-
 def call_llm(messages: list) -> dict:
     """Call LLM via OpenAI client and parse JSON action."""
     response = llm_client.chat.completions.create(
@@ -60,9 +59,8 @@ def call_llm(messages: list) -> dict:
     text = text.replace("```json", "").replace("```", "").strip()
     return json.loads(text)
 
-
-def run_episode(task_id: str, episode_num: int) -> dict:
-    """Run one full episode. Returns episode summary dict."""
+def run_episode(task_id: str, episode_num: int):
+    """Run one full episode with required stdout markers."""
     base = ENV_BASE_URL.rstrip("/")
 
     # Reset environment
@@ -70,34 +68,27 @@ def run_episode(task_id: str, episode_num: int) -> dict:
     reset_resp.raise_for_status()
     obs = reset_resp.json()
 
-    # [START] log — REQUIRED format, judges parse this
-    print(json.dumps({
-        "type":        "[START]",
-        "episode":     episode_num,
-        "task_id":     task_id,
-        "initial_obs": obs,
-    }))
+    # [START] marker
+    print(f"[START] task={task_id}", flush=True)
 
     messages     = [{"role": "system", "content": SYSTEM_PROMPT}]
     total_reward = 0.0
     step         = 0
     done         = False
-    last_info    = {}
 
     while not done and step < MAX_STEPS:
         step += 1
 
         user_content = (
-            f"Step {step}.\n"
+            f"Step {step}. "
             f"phase={obs['current_phase']} | "
             f"time_remaining={obs['time_remaining_seconds']}s | "
             f"sessions_done={obs['sessions_completed']} | "
-            f"focus_score={obs['focus_score']}\n"
-            f"active_distractions={obs['active_distractions']}\n"
-            f"blocked_apps={obs['blocked_apps']}\n"
-            f"last_feedback={obs['last_action_feedback']}\n"
-            f"new_distraction={obs.get('distraction_event')}\n"
-            "Choose action (JSON only):"
+            f"focus_score={obs['focus_score']} | "
+            f"active_distractions={obs['active_distractions']} | "
+            f"blocked_apps={obs['blocked_apps']} | "
+            f"last_feedback={obs['last_action_feedback']} | "
+            f"new_distraction={obs.get('distraction_event')}"
         )
         messages.append({"role": "user", "content": user_content})
 
@@ -114,46 +105,22 @@ def run_episode(task_id: str, episode_num: int) -> dict:
 
         reward       = result["reward"]
         done         = result["done"]
-        last_info    = result.get("info", {})
         obs          = result
         total_reward += reward
 
-        # [STEP] log — REQUIRED format, judges parse this
-        print(json.dumps({
-            "type":    "[STEP]",
-            "episode": episode_num,
-            "step":    step,
-            "action":  action,
-            "reward":  round(reward, 4),
-            "done":    done,
-            "obs": {
-                "phase":          obs["current_phase"],
-                "time_remaining": obs["time_remaining_seconds"],
-                "focus_score":    obs["focus_score"],
-                "sessions":       obs["sessions_completed"],
-                "blocked":        obs["blocked_apps"],
-                "distractions":   obs["active_distractions"],
-            },
-        }))
+        # [STEP] marker
+        print(f"[STEP] step={step} reward={reward}", flush=True)
 
-    # [END] log — REQUIRED format, judges parse this
-    print(json.dumps({
-        "type":         "[END]",
-        "episode":      episode_num,
-        "task_id":      task_id,
-        "total_reward": round(total_reward, 4),
-        "steps":        step,
-        "success":      last_info.get("success", False),
-    }))
+    # [END] marker
+    print(f"[END] task={task_id} score={total_reward} steps={step}", flush=True)
 
     return {
         "episode":      episode_num,
         "task_id":      task_id,
         "total_reward": round(total_reward, 4),
         "steps":        step,
-        "success":      last_info.get("success", False),
+        "success":      result.get("info", {}).get("success", False),
     }
-
 
 def main():
     tasks   = ["task_1", "task_2", "task_3"]
@@ -164,17 +131,11 @@ def main():
             result = run_episode(task_id=task_id, episode_num=i)
             results.append(result)
         except Exception as e:
-            print(json.dumps({"type": "[ERROR]", "episode": i, "error": str(e)}))
+            print(f"[ERROR] episode={i} error={e}", flush=True)
 
     avg_reward   = sum(r["total_reward"] for r in results) / max(len(results), 1)
     success_rate = sum(1 for r in results if r["success"]) / max(len(results), 1)
-    print(json.dumps({
-        "type":         "SUMMARY",
-        "avg_reward":   round(avg_reward, 4),
-        "success_rate": round(success_rate, 4),
-        "episodes":     results,
-    }))
-
+    print(f"SUMMARY avg_reward={avg_reward} success_rate={success_rate}", flush=True)
 
 if __name__ == "__main__":
     main()
