@@ -1,0 +1,65 @@
+name: focusflow-env
+description: >
+  An RL environment where an AI agent learns to manage a student's focus session.
+  The agent blocks distracting apps, times breaks correctly, and maximises
+  deep-focus time using a Pomodoro-style framework.
+  Built on Meta's OpenEnv framework for the Meta x Scaler Hackathon 2026.
+
+version: "1.0.0"
+author: Abdul Hannan
+license: MIT
+
+environment:
+  base_url: https://YOUR-HF-SPACE-NAME.hf.space
+  framework: openenv
+  language: python
+  python_version: "3.11"
+
+api:
+  reset:
+    method: POST
+    path: /reset
+    params:
+      - name: task_id
+        type: string
+        default: task_1
+        description: Which task to load (task_1, task_2, task_3)
+      - name: seed
+        type: integer
+        default: 42
+  step:
+    method: POST
+    path: /step
+    body: FocusAction
+  state:
+    method: GET
+    path: /state
+
+tasks:
+  - id: task_1
+    description: Complete one 25-min focus session without checking any distracting app.
+    max_steps: 60
+    success_reward: 1.0
+
+  - id: task_2
+    description: Complete two sessions with strategically timed breaks.
+    max_steps: 120
+    success_reward: 1.0
+
+  - id: task_3
+    description: Block all 5 distracting apps within 10 steps then complete a session.
+    max_steps: 80
+    success_reward: 1.0
+
+reward_range: [-0.5, 0.5]
+action_space: discrete (5 action types)
+observation_space: structured JSON (FocusObservation)
+
+tags:
+  - productivity
+  - student
+  - anti-distraction
+  - pomodoro
+  - llm-agent
+  - openenv
+  - meta-hackathon-2026
