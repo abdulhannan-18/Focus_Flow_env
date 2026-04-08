@@ -111,8 +111,11 @@ def run_episode(task_id: str, episode_num: int):
         # [STEP] marker
         print(f"[STEP] step={step} reward={reward}", flush=True)
 
+    # Normalize reward to a score between 0 and 1
+    raw_score = total_reward / max(step, 1)
+
     # Clamp score strictly inside (0, 1)
-    safe_score = max(1e-6, min(total_reward, 1 - 1e-6))
+    safe_score = max(1e-6, min(raw_score, 1 - 1e-6))
 
     # [END] marker
     print(f"[END] task={task_id} score={safe_score} steps={step}", flush=True)
