@@ -1,12 +1,13 @@
 name: focusflow-env
+version: "2.0.0"
 description: >
-  An RL environment where an AI agent learns to manage a student's focus session.
-  The agent blocks distracting apps, times breaks correctly, and maximises
-  deep-focus time using a Pomodoro-style framework.
-  Built on Meta's OpenEnv framework for the Meta x Scaler Hackathon 2026.
+  LLM-hard RL environment for student focus and distraction management.
+  Agent must handle natural language distraction events, manage cognitive load,
+  track multi-day deadlines, and justify every decision with graded reasoning.
 
-version: "1.0.0"
 author: Abdul Hannan
+theme: "Theme 3.2 - Personalized Tasks"
+hackathon: "Meta x Scaler OpenEnv Hackathon 2026"
 license: MIT
 
 environment:
@@ -15,6 +16,7 @@ environment:
   language: python
   python_version: "3.11"
 
+# OpenEnv HTTP API endpoints
 api:
   reset:
     method: POST
@@ -27,38 +29,96 @@ api:
       - name: seed
         type: integer
         default: 42
+      - name: session_id
+        type: string
+        default: default
+        description: Unique ID for multi-agent parallel training
   step:
     method: POST
     path: /step
+    params:
+      - name: session_id
+        type: string
+        default: default
     body: FocusAction
   state:
     method: GET
     path: /state
+    params:
+      - name: session_id
+        type: string
+        default: default
+  health:
+    method: GET
+    path: /health
+  tasks:
+    method: GET
+    path: /tasks
+  metrics:
+    method: GET
+    path: /metrics
 
+# Tasks
 tasks:
   - id: task_1
-    description: Complete one 25-min focus session without checking any distracting app.
+    description: Single focused session. Complete one 25-min Pomodoro with zero app checks and handle NL events correctly.
     max_steps: 60
-    success_reward: 1.0
-
+    days: 1
   - id: task_2
-    description: Complete two sessions with strategically timed breaks.
+    description: Multi-session day. Manage cognitive load and defer low-urgency events across 2 sessions.
     max_steps: 120
-    success_reward: 1.0
-
+    days: 1
   - id: task_3
-    description: Block all 5 distracting apps within 10 steps then complete a session.
-    max_steps: 80
-    success_reward: 1.0
+    description: Week planner. Plan a 3-day schedule, handle shifting deadlines, and maintain energy levels.
+    max_steps: 240
+    days: 3
 
-reward_range: [-0.5, 0.5]
-action_space: discrete (5 action types)
-observation_space: structured JSON (FocusObservation)
+# Action space
+actions:
+  - focus
+  - block_app
+  - take_break
+  - defer_event
+  - respond_to_event
+  - plan_day
+  - adjust_energy
+  - check_app
+  - quit_session
+
+# Observation fields
+observation:
+  - time_remaining_seconds
+  - current_phase
+  - sessions_completed
+  - focus_score
+  - active_distractions
+  - blocked_apps
+  - pending_event
+  - day_context
+  - cognitive_load
+  - deadline_pressure
+  - last_action_feedback
+  - reasoning_quality_score
+
+# Reward range
+reward:
+  min: -0.60
+  max:  0.60
+  shaped: true
+  reasoning_graded: true
+
+# Training
+training:
+  frameworks: [trl, unsloth]
+  algorithm: GRPO
+  model: unsloth/Llama-3.2-1B-Instruct
+  colab_notebook: training_colab.py
 
 tags:
   - productivity
   - student
-  - anti-distraction
+  - llm-hard
+  - natural-language-rl
   - pomodoro
   - llm-agent
   - openenv
