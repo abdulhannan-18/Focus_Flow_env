@@ -99,9 +99,43 @@ EVENT_POOL: List[Dict[str, Any]] = [
         "hint": "Cognitive fatigue signal → take a break before performance crashes"
     },
 ]
+ 
+def grade_reasoning(reasoning: str, action_type: str, event: Optional[DistractionEvent]) -> float:
+    """
+    Upgraded heuristic grader with anti-spam protections.
+    """
+    if not reasoning or len(reasoning.strip()) < 10:
+        return 0.0
 
+    text = reasoning.lower()
+    words = text.split()
+    
+    # ANTI-SPAM: Penalize if the agent is just repeating the same words
+    unique_ratio = len(set(words)) / max(1, len(words))
+    if unique_ratio < 0.5:
+        return 0.0  # Zero score for word salad/spam
+        
+    # ANTI-SHORTCUT: Must be at least a somewhat complete thought (e.g., > 5 words)
+    if len(words) < 5:
+        return 0.1
+
+    score = 0.3   # baseline for valid reasoning
+
+    # Reward mentioning relevant concepts
+    focus_keywords   = ["focus", "deadline", "study", "priority", "session", "pomodoro"]
+    context_keywords = ["urgent", "can wait", "defer", "later", "energy", "tired", "break"]
+    planning_words   = ["because", "since", "therefore", "so that", "in order to", "plan"]
+
+    score += 0.1 * min(2, sum(1 for k in focus_keywords   if k in text)) / 2
+    score += 0.2 * min(2, sum(1 for k in context_keywords if k in text)) / 2
+    score += 0.2 * min(2, sum(1 for k in planning_words   if k in text)) / 2
+
+    # Bonus: reasoning matches correct action for event
+    if event and event.correct_action == action_type:
+        score += 0.2
+
+    return round(min(1.0, score), 3)
 # ─── Tasks ────────────────────────────────────────────────────────────────────
-#In my previous logic ive used val() it doesn't perform well and giving random outputs so I've now added lambda function to work properly and give correct output after evaluation
 
 TASKS = [
     {
