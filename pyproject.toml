@@ -1,23 +1,50 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
 [project]
 name = "focusflow-env"
-version = "1.0.0"
-description = "OpenEnv RL environment for student focus and anti-distraction agent training."
+version = "2.0.0"
+description = "LLM-hard OpenEnv RL environment for student focus & distraction management"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
 authors = [
-    {name = "Abdul Hannan"}
+  { name = "Abdul Hannan" }
 ]
-requires-python = ">=3.11"
+keywords = ["reinforcement-learning", "openenv", "llm", "rl-environment", "focus"]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "License :: OSI Approved :: MIT License",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
 dependencies = [
-    "fastapi==0.111.0",
-    "uvicorn[standard]==0.29.0",
-    "pydantic==2.7.1",
-    "httpx==0.27.0",
-    "python-dotenv==1.0.1",
-    "openai>=1.30.0",
-    "openenv-core>=0.2.0",
+  "fastapi==0.111.0",
+  "uvicorn[standard]==0.29.0",
+  "pydantic==2.7.1",
+  "openai>=1.30.0",
+  "requests>=2.31.0",
+  "python-dotenv>=1.0.0",
+]
+
+[project.optional-dependencies]
+train = [
+  "trl>=0.9.0",
+  "transformers>=4.41.0",
+  "datasets>=2.19.0",
+  "unsloth",
+  "torch>=2.2.0",
+  "matplotlib>=3.8.0",
+  "numpy>=1.26.0",
+]
+dev = [
+  "pytest>=8.0.0",
+  "httpx>=0.27.0",
 ]
 
 [project.scripts]
-server = "server.app:main"
-[build-system]
-requires = ["setuptools>=68"]
-build-backend = "setuptools.backends.legacy:build"
+focusflow-serve = "app:main"
+
+[project.urls]
+Homepage   = "https://github.com/abdulhannan-18/Focus_Flow_env"
+Repository = "https://github.com/abdulhannan-18/Focus_Flow_env"
