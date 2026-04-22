@@ -1,67 +1,40 @@
-# FocusFlow RL Environment v2.0
-### Meta × Scaler OpenEnv Hackathon 2026
+# 🧠 FocusFlow: LLM-Hard RL Environment for Cognitive Management
+### Meta × Scaler OpenEnv Hackathon 2026 — Grand Finale Submission
 
-> An LLM-hard RL environment where an AI agent manages a student's real cognitive world —
-> navigating natural language distractions, shifting deadlines, and multi-day energy dynamics.
+[![Open in Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/abdulhannan-18/Focus_Flow_env/blob/main/training_colab.py)
+[![HuggingFace Space](https://img.shields.io/badge/🤗-HuggingFace%20Live%20API-yellow)](https://huggingface.co/spaces/hannan2859r/focusflow_env)
+[![Python 3.11](https://img.shields.io/badge/python-3.11-blue.svg)](https://www.python.org/downloads/release/python-3110/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](https://opensource.org/licenses/MIT)
 
-[![Open in Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/your-colab-link)
-[![HuggingFace Space](https://img.shields.io/badge/🤗-HuggingFace%20Space-yellow)](https://huggingface.co/spaces/your-space)
-
----
-
-## Why This Environment Is LLM-Hard
-
-Unlike toy RL environments solvable by a simple rule-based policy, FocusFlow requires genuine LLM reasoning:
-
-| Challenge | Why It Needs an LLM |
-|---|---|
-| Natural language distraction events | Agent must read and interpret messages to judge urgency |
-| Mandatory `reasoning` field (graded) | Empty reasoning = reward penalty. LLMs must justify decisions |
-| Cognitive load dynamics | Overworking degrades future rewards — requires adaptive strategy |
-| Multi-day deadline tracking | Planning today affects energy and deadlines tomorrow |
-| Deferred events expire | Agent must track time-sensitive commitments across steps |
-| Urgency vs. deferability trade-off | "Mom called twice" ≠ "Friend wants to play BGMI" |
-
-A simple `if-else` policy cannot pass Task 2 or Task 3 without understanding language.
+> **Executive Summary:** FocusFlow is an OpenEnv-compliant reinforcement learning environment that simulates the cognitive friction of modern digital life. It abandons traditional spatial tasks (like moving a robot arm) in favor of **LLM-hard cognitive tasks**: managing mental energy, tracking shifting deadlines, and utilizing natural language comprehension to filter informal social distractions from urgent professional tasks.
 
 ---
 
-## Environment Design
+## 🎯 Hackathon Theme Alignment
 
-### Action Space (8 actions)
+**Core Themes Addressed:** Long-Horizon Planning & Instruction Following | World Modeling across Professional/Personal Tasks
 
-| Action | When to Use | Reward |
-|---|---|---|
-| `focus` | Stay on task | +0.05 × (1 − cognitive_load) |
-| `block_app` | Block a distracting app | +0.20 × temptation_level |
-| `take_break` | Rest at session boundary or when load > 0.75 | +0.20 to +0.30 |
-| `defer_event` | Postpone a low-urgency event | +0.15 if correct, −0.05 if wrong |
-| `respond_to_event` | Handle urgent events immediately | +0.20 if correct |
-| `plan_day` | Set a study schedule at day start | +0.00 to +0.30 based on quality |
-| `adjust_energy` | Recover from fatigue/environmental noise | +0.10 |
-| `check_app` | **(BAD)** Give in to distraction | −0.50 |
+* **The Problem Statement:** Modern digital workspaces cause catastrophic context-switching. Traditional RL bots fail here because evaluating a distraction requires contextual language understanding. The problem is designing an environment that forces an AI agent to manage time, mental energy, and dynamic deadlines while processing rich natural-language interruptions.
+* **The Environment:** A fully Dockerized, RESTful API environment. The world state dynamically models time progression, cognitive load (rising with work, decaying with breaks), and an event engine that injects multi-tiered distractions.
+* **Agent Capabilities Required:** Agents must possess reading comprehension (urgency evaluation), multi-day memory (tracking deferred events before they expire), and Chain-of-Thought (CoT) reasoning to justify scheduling decisions.
 
-### Reasoning Quality Reward (Universal)
+---
 
-Every action carries a **reasoning bonus/penalty** (±0.10) based on:
-- Mentions of relevant concepts (urgency, priority, focus, deadlines)
-- Use of causal language ("because", "therefore", "in order to")
-- Whether the action matches the correct response for the active event
+## 🏗️ System Architecture & Observation Space
 
-This is what separates an LLM from a rule-based bot.
+The environment operates via a FastAPI backend, serving strictly typed JSON payloads. The observation space is designed to be highly complex, forcing the LLM to synthesize multiple data streams.
 
-### Observation Space
-
+### Example Observation Payload
 ```json
 {
   "time_remaining_seconds": 1140,
   "current_phase": "focus",
   "sessions_completed": 1,
   "focus_score": 0.923,
-  "active_distractions": ["Instagram", "BGMI"],
-  "blocked_apps": ["YouTube", "Netflix"],
   "cognitive_load": 0.62,
   "deadline_pressure": 0.45,
+  "active_distractions": ["Instagram", "BGMI"],
+  "blocked_apps": ["YouTube"],
   "pending_event": {
     "type": "social_message",
     "description": "Rahul texted: 'bhai BGMI chalate hain, sirf 1 ghanta, kal exam nahi hai'",
@@ -82,118 +55,97 @@ This is what separates an LLM from a rule-based bot.
 }
 ```
 
-### Tasks
+---
 
-| Task | Description | Max Steps | Key Challenge |
+## ⚖️ Dual-Layer Reward Model & Evaluation Logic
+
+FocusFlow implements a hybrid objective/subjective reward function. 
+
+### 1. Objective Mechanical Rewards
+| Action | Environmental Trigger | Reward / Penalty |
+|---|---|---|
+| `focus` | Executed during work phase | `+0.05 × (1 − cognitive_load)` |
+| `block_app` | Targets an active high-temptation app | `+0.20 × temptation_level` |
+| `take_break` | Executed when `cognitive_load > 0.75` | `+0.20` to `+0.30` |
+| `defer_event` | Postpones a low-urgency social text | `+0.15` (Correct) / `-0.05` (Wrong) |
+| `respond_to_event` | Handles urgent/hard deadlines | `+0.20` (Correct) / `-0.10` (Wrong) |
+| `plan_day` | Sets schedule aligning with deadlines | `+0.00` to `+0.30` (Quality scaled) |
+| `check_app` | **(BAD)** Agent gives in to temptation | **`-0.50` Hard Penalty** |
+
+### 2. Subjective Reasoning Grader
+To prevent random action-spamming, the `grade_reasoning()` heuristic parses the agent's mandatory reasoning field. 
+* It applies a `±0.10` multiplier based on the use of causal language, task-awareness, and logical alignment with the current `pending_event`. 
+* Empty or repetitive reasoning results in immediate reward degradation.
+
+---
+
+## 📋 Task Progressions
+
+| Task ID | Challenge Pillar | Success Criteria | Horizon |
 |---|---|---|---|
-| `task_1` | One session, zero distractions | 60 | Reasoning quality + event handling |
-| `task_2` | Two sessions, manage cognitive load | 120 | Break timing + multi-event judgment |
-| `task_3` | 3-day week plan, maintain streak | 240 | Long-horizon planning + energy decay |
+| `task_1` | **Execution** | Complete a 25-min session with 0 app checks. Handle basic distractions logically. | 60 Steps |
+| `task_2` | **Load Management** | Complete a multi-session day. Keep `cognitive_load < 0.85` via strategic breaks. | 120 Steps |
+| `task_3` | **Long-Horizon** | Execute a 3-day plan, manage energy decay, and maintain a perfect focus streak. | 240 Steps |
 
 ---
 
-## Reward Function Summary
+## 🚀 Post-Training & Self-Improvement Strategy (GRPO)
 
-```
-Universal (every step):
-  reasoning_quality ∈ [-0.10, +0.10]   scored by heuristic grader
+A baseline LLM will struggle with FocusFlow's delayed rewards (e.g., deferring an event now to save energy for a deadline 50 steps later). 
 
-Action-specific:
-  focus            → +0.05 × (1 - cognitive_load)
-  block_app        → +0.20 × temptation_level
-  take_break       → +0.20 to +0.30 (well-timed) or -0.10 (premature)
-  defer_event      → +0.15 (correct) / -0.05 (wrong) / -0.20 (non-deferrable)
-  respond_to_event → +0.20 (correct) / -0.10 (wrong)
-  plan_day         → +0.00 to +0.30 (based on plan quality scoring)
-  adjust_energy    → +0.10 (when needed) / +0.01 (unnecessary)
-  check_app        → -0.50 (hard penalty)
-
-Episode bonuses:
-  task_1: +0.25 if avg reasoning quality > 70%
-  task_2: +0.30 for zero app checks across both sessions
-  task_3: +0.40 for 3-day perfect focus streak
-```
+To achieve an optimal policy, the project includes a **Group Relative Policy Optimization (GRPO)** pipeline:
+1.  **Framework:** Uses `TRL` (Transformer Reinforcement Learning) and `Unsloth` for efficient 4-bit quantization on consumer hardware (T4 GPUs).
+2.  **Data Generation:** The baseline agent explores the live FastAPI environment, collecting trajectories of observations, actions, and rewards.
+3.  **Optimization:** GRPO updates the LLM weights directly based on the environment's trajectory rewards, teaching the model that maintaining cognitive load and providing high-quality reasoning yields the highest cumulative return.
 
 ---
 
-## Quick Start
+## 💻 Technical Setup & Quick Start
 
+### Local Installation
 ```bash
-# Install
+# Clone the repository
+git clone [https://github.com/abdulhannan-18/Focus_Flow_env.git](https://github.com/abdulhannan-18/Focus_Flow_env.git)
+cd Focus_Flow_env
+
+# Install dependencies
 pip install -r requirements.txt
 
-# Start environment server
+# Start the OpenEnv FastAPI server
 uvicorn app:app --host 0.0.0.0 --port 7860 --reload
+```
 
-# Reset and step (in another terminal)
-curl -X POST "http://localhost:7860/reset?task_id=task_1"
+### API Interaction Example
+```bash
+# Reset the environment for Task 2
+curl -X POST "http://localhost:7860/reset?task_id=task_2"
 
+# Step the environment
 curl -X POST http://localhost:7860/step \
   -H "Content-Type: application/json" \
   -d '{
     "action_type": "defer_event",
-    "event_id": "evt_3",
-    "reasoning": "This is a low urgency social message from a friend asking to play games. Since I have a Math Assignment due at step 45 and I am currently in focus phase, I should defer this and stay focused. The friend can wait.",
-    "response_text": "bhai abhi padh raha hoon, baad mein baat karte hain"
+    "reasoning": "This is a low-urgency gaming request. I have a Math assignment due at step 45, so I must defer this and maintain my focus phase.",
+    "response_text": "Can not play right now, studying."
   }'
 ```
 
-### Run LLM Agent
-
-```bash
-export API_BASE_URL=https://api.groq.com/openai/v1
-export GROQ_API_KEY=your_key_here
-export MODEL_NAME=llama-3.1-8b-instant
-export ENV_BASE_URL=http://localhost:7860
-export TASK_ID=task_2
-export MAX_EPISODES=5
-
-python inference.py
-```
-
-### Train with GRPO (Google Colab T4)
-
-Open `training_colab.py` in Colab. It will:
-1. Load `Llama-3.2-1B-Instruct` with Unsloth 4-bit quantisation
-2. Collect environment episodes as training data
-3. Fine-tune with GRPO using environment rewards
-4. Plot reward curves
-5. Push trained model to HuggingFace Hub
-
 ---
 
-## Project Structure
+## 📁 Repository Architecture
 
-```
-focusflow_rl_env/
-├── models.py           # Pydantic: FocusAction, FocusObservation, FocusState, DistractionEvent
-├── environment.py      # Core RL logic: step(), reset(), reward, NL event grading
-├── app.py              # FastAPI server (OpenEnv HTTP API + /metrics endpoint)
-├── inference.py        # LLM baseline agent with chain-of-thought prompting
-├── training_colab.py   # GRPO training script (Unsloth + HF TRL)
-├── openenv.yaml        # OpenEnv metadata
-├── Dockerfile
-├── requirements.txt
-└── README.md
+```text
+Focus_Flow_env/
+├── app.py              # FastAPI OpenEnv REST Server
+├── environment.py      # Core RL dynamics, Cognitive Load Math, Event Engine
+├── models.py           # Pydantic schemas enforcing strict LLM typing
+├── inference.py        # Baseline LLM Agent (CoT Prompting)
+├── training_colab.py   # GRPO Fine-tuning Pipeline
+├── openenv.yaml        # OpenEnv specifications
+├── Dockerfile          # HuggingFace Space deployment configuration
+└── requirements.txt    # Python dependencies
 ```
 
 ---
-
-## What Was Upgraded in v2.0
-
-| Feature | v1 (original) | v2 (this submission) |
-|---|---|---|
-| Distraction events | App names only | Rich NL messages with urgency & deferability |
-| Reasoning | Not required | Mandatory, graded, rewarded |
-| Action space | 5 simple actions | 8 actions including plan_day, defer, respond |
-| Cognitive load | Not modelled | Dynamic: rises with focus, falls with breaks |
-| Multi-day context | Single session | 3-day week with energy decay & deadlines |
-| Training script | Missing | Full GRPO Colab notebook with reward curves |
-| Success criteria | Fixed string eval() | Type-safe lambda functions |
-| Metrics endpoint | None | /metrics for reward curve plotting |
-
----
-
-## Submitted by
-
-Abdul Hannan — Meta × Scaler OpenEnv Hackathon 2026
+**Submitted by:** Abdul Hannan
+**Event:** Meta × Scaler OpenEnv Hackathon 2026
