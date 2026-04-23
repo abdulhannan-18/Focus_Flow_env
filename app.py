@@ -10,12 +10,13 @@ Endpoints:
   GET  /tasks          → list of all tasks
   GET  /metrics        → episode-level training metrics (for reward curve UI)
   POST /reset_metrics  → clear metrics history
+  POST /grader         → direct reasoning quality grader (offline evaluation)
 """
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from models import FocusAction, FocusObservation, FocusState
-from environment import FocusFlowEnvironment, TASKS
+from environment import FocusFlowEnvironment, TASKS, grade_reasoning
 from typing import Optional, List, Dict
 from pydantic import BaseModel
 import uvicorn
@@ -38,20 +39,29 @@ app.add_middleware(
 )
 
 # ── Global state ──────────────────────────────────────────────────────────────
-
-# Map session IDs to their specific environment instances
 sessions: Dict[str, FocusFlowEnvironment] = {}
-
-# Track metrics and episode counts per session
 session_metrics: Dict[str, List[dict]] = {}
 session_episodes: Dict[str, int] = {}
 
 
-# ── Response model ────────────────────────────────────────────────────────────
+# ── Response models ───────────────────────────────────────────────────────────
 class StepResponse(FocusObservation):
-    reward:  float
-    done:    bool
-    info:    dict
+    reward: float
+    done:   bool
+    info:   dict
+
+
+class GraderRequest(BaseModel):
+    reasoning:   str
+    action_type: str
+
+
+class GraderResponse(BaseModel):
+    reasoning:               str
+    action_type:             str
+    reasoning_quality_score: float
+    verdict:                 str
+    explanation:             str
 
 
 # ── Endpoints ─────────────────────────────────────────────────────────────────
@@ -95,14 +105,14 @@ def reset(task_id: str = "task_1", seed: int = 42, session_id: str = "default"):
             status_code=400,
             detail=f"Unknown task_id '{task_id}'. Valid: {valid_ids}"
         )
-    
+
     if session_id not in session_episodes:
         session_episodes[session_id] = 0
-        session_metrics[session_id] = []
-        
+        session_metrics[session_id]  = []
+
     sessions[session_id] = FocusFlowEnvironment(task_id=task_id, seed=seed)
     session_episodes[session_id] += 1
-    
+
     return sessions[session_id].reset()
 
 
@@ -110,7 +120,6 @@ def reset(task_id: str = "task_1", seed: int = 42, session_id: str = "default"):
 def step(action: FocusAction, session_id: str = "default"):
     """
     Submit one action. Returns next observation + reward + done flag.
-
     The `reasoning` field in FocusAction is REQUIRED and graded.
     Empty or low-quality reasoning incurs a reward penalty.
     """
@@ -120,17 +129,16 @@ def step(action: FocusAction, session_id: str = "default"):
             status_code=400,
             detail=f"Session '{session_id}' not initialised. Call POST /reset first."
         )
-        
+
     obs, reward, done, info = env.step(action)
 
-    # Log for metrics endpoint
     session_metrics[session_id].append({
-        "episode":    session_episodes[session_id],
-        "step":       info["step"],
-        "reward":     reward,
-        "cumulative": info["cumulative"],
+        "episode":     session_episodes[session_id],
+        "step":        info["step"],
+        "reward":      reward,
+        "cumulative":  info["cumulative"],
         "reasoning_q": obs.reasoning_quality_score,
-        "success":    info.get("success", False),
+        "success":     info.get("success", False),
     })
 
     return StepResponse(
@@ -160,11 +168,10 @@ def metrics(session_id: str = "default"):
     Use this in your Colab notebook to visualise training progress.
     """
     metrics_log = session_metrics.get(session_id, [])
-    
+
     if not metrics_log:
         return {"message": "No data yet. Run some episodes first.", "data": []}
 
-    # Aggregate by episode
     from collections import defaultdict
     ep_rewards = defaultdict(float)
     ep_steps   = defaultdict(int)
@@ -189,16 +196,47 @@ def metrics(session_id: str = "default"):
         "total_steps":    len(metrics_log),
         "total_episodes": len(episodes_summary),
         "episodes":       episodes_summary,
-        "raw_steps":      metrics_log[-100:],   # last 100 steps
+        "raw_steps":      metrics_log[-100:],
     }
 
 
 @app.post("/reset_metrics")
 def reset_metrics(session_id: str = "default"):
     """Clear the metrics log. Call this between training runs."""
-    session_metrics[session_id] = []
+    session_metrics[session_id]  = []
     session_episodes[session_id] = 0
     return {"message": f"Metrics cleared for session '{session_id}'."}
+
+
+@app.post("/grader", response_model=GraderResponse)
+def grader(request: GraderRequest):
+    """
+    Direct grader invocation for offline evaluation.
+    Use this to test reasoning quality without running a full episode.
+    Judges can use this to verify the grading pipeline works correctly.
+    """
+    score = grade_reasoning(request.reasoning, request.action_type, None)
+
+    if score >= 0.7:
+        verdict     = "excellent"
+        explanation = "Reasoning is clear, relevant, and uses proper justification."
+    elif score >= 0.5:
+        verdict     = "good"
+        explanation = "Reasoning is adequate but could mention more context signals."
+    elif score >= 0.3:
+        verdict     = "weak"
+        explanation = "Reasoning is too short or lacks relevant keywords."
+    else:
+        verdict     = "poor"
+        explanation = "Reasoning is empty, spammy, or below minimum quality threshold."
+
+    return GraderResponse(
+        reasoning               = request.reasoning,
+        action_type             = request.action_type,
+        reasoning_quality_score = score,
+        verdict                 = verdict,
+        explanation             = explanation,
+    )
 
 
 if __name__ == "__main__":
