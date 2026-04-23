@@ -40,7 +40,6 @@ DISTRACTION_POOL: List[DistractingApp] = [
 ]
 
 # ─── Rich NL distraction events ───────────────────────────────────────────────
-# Each has a `correct_action` so the reward function can grade the agent's choice.
 EVENT_POOL: List[Dict[str, Any]] = [
     {
         "type": DistractionType.social_message,
@@ -99,29 +98,31 @@ EVENT_POOL: List[Dict[str, Any]] = [
         "hint": "Cognitive fatigue signal → take a break before performance crashes"
     },
 ]
- 
+
+
+# ─── Reasoning quality grader (SINGLE definition — anti-spam version) ─────────
 def grade_reasoning(reasoning: str, action_type: str, event: Optional[DistractionEvent]) -> float:
     """
     Upgraded heuristic grader with anti-spam protections.
+    Returns a score from 0.0 to 1.0.
     """
     if not reasoning or len(reasoning.strip()) < 10:
         return 0.0
 
-    text = reasoning.lower()
+    text  = reasoning.lower()
     words = text.split()
-    
-    # ANTI-SPAM: Penalize if the agent is just repeating the same words
+
+    # ANTI-SPAM: Penalize if agent is just repeating the same words
     unique_ratio = len(set(words)) / max(1, len(words))
     if unique_ratio < 0.5:
         return 0.0  # Zero score for word salad/spam
-        
-    # ANTI-SHORTCUT: Must be at least a somewhat complete thought (e.g., > 5 words)
+
+    # ANTI-SHORTCUT: Must be at least a somewhat complete thought
     if len(words) < 5:
         return 0.1
 
     score = 0.3   # baseline for valid reasoning
 
-    # Reward mentioning relevant concepts
     focus_keywords   = ["focus", "deadline", "study", "priority", "session", "pomodoro"]
     context_keywords = ["urgent", "can wait", "defer", "later", "energy", "tired", "break"]
     planning_words   = ["because", "since", "therefore", "so that", "in order to", "plan"]
@@ -135,8 +136,9 @@ def grade_reasoning(reasoning: str, action_type: str, event: Optional[Distractio
         score += 0.2
 
     return round(min(1.0, score), 3)
-# ─── Tasks ────────────────────────────────────────────────────────────────────
 
+
+# ─── Tasks ────────────────────────────────────────────────────────────────────
 TASKS = [
     {
         "id": "task_1",
@@ -146,7 +148,6 @@ TASKS = [
         ),
         "max_steps": 60,
         "success_fn": lambda s: s["sessions_completed"] >= 1 and len(s["apps_checked"]) == 0,
-        #The bonus fn here is giving the good scores on top of it if agent did really well .
         "bonus_fn":   lambda s: 0.25 if s["reasoning_scores"] and
                                   sum(s["reasoning_scores"]) / len(s["reasoning_scores"]) > 0.7
                                   else 0.0,
@@ -190,51 +191,19 @@ TASKS = [
 ]
 
 
-# ─── Reasoning quality grader ─────────────────────────────────────────────────
-
-def grade_reasoning(reasoning: str, action_type: str, event: Optional[DistractionEvent]) -> float:
-    """
-    Simple heuristic grader for reasoning quality (0–1).
-    Real training would use an LLM-as-judge here.
-    """
-    if not reasoning or len(reasoning.strip()) < 10:
-        return 0.0
-
-    score = 0.3   # baseline for non-empty reasoning
-
-    text = reasoning.lower()
-
-    # Reward mentioning relevant concepts
-    #It checks how many of these words appear in the reasoning text. More relevant words = higher score.
-    focus_keywords   = ["focus", "deadline", "study", "priority", "session", "pomodoro"]
-    context_keywords = ["urgent", "can wait", "defer", "later", "energy", "tired", "break"]
-    planning_words   = ["because", "since", "therefore", "so that", "in order to", "plan"]
-
-    score += 0.1 * min(2, sum(1 for k in focus_keywords   if k in text)) / 2
-    score += 0.2 * min(2, sum(1 for k in context_keywords if k in text)) / 2
-    score += 0.2 * min(2, sum(1 for k in planning_words   if k in text)) / 2
-
-    # Bonus: reasoning matches correct action for event
-    if event and event.correct_action == action_type:
-        score += 0.2
-        #If score above 0.5 reward else penalty
-
-    return round(min(1.0, score), 3)
-
-
 # ─── Environment ──────────────────────────────────────────────────────────────
-
 class FocusFlowEnvironment:
     """
     OpenEnv-compatible RL environment.
 
-    Key upgrades over v1:
+    Key features:
     - Rich NL distraction events with urgency & correct_action grading
     - Mandatory reasoning field scored by grade_reasoning()
     - Multi-day context with energy decay and deadline tracking
     - Cognitive load dynamics (overwork → worse performance)
     - Deferred events expire after deadline_steps
     - plan_day action graded against actual completion
+    - Per-step focus tracking for real-time focus_score
     """
 
     def __init__(self, task_id: str = "task_1", seed: int = 42):
@@ -243,7 +212,6 @@ class FocusFlowEnvironment:
         self._reset_internal()
 
     # ── Internal helpers ──────────────────────────────────────────────────────
-    #It makes eveything to back on zero and make a fresh run state 
     def _reset_internal(self):
         self.step_count          = 0
         self.max_steps           = self.task["max_steps"]
@@ -271,10 +239,9 @@ class FocusFlowEnvironment:
             energy_level=1.0,
             pending_deadlines=self._generate_deadlines(),
         )
-        # Day plan set by agent via plan_day action
         self._agent_day_plan: List[str] = []
         self._last_reasoning_score      = 0.0
-     
+
     def _generate_deadlines(self) -> List[Dict[str, Any]]:
         deadlines = [
             {"task": "Math Assignment",    "due_day": 1, "due_step": 45, "completed": False},
@@ -282,35 +249,32 @@ class FocusFlowEnvironment:
             {"task": "CS Project Demo",    "due_day": 3, "due_step": 200,"completed": False},
         ]
         return deadlines[:self.task["days"]]
-     #Randomly picking apps which are not blocked and called at the start when new session begin 
+
     def _sample_apps(self, n: int) -> List[str]:
         available = [d.name for d in DISTRACTION_POOL if d.name not in self.apps_blocked]
         return random.sample(available, min(n, len(available)))
-    
+
     def _maybe_spawn_event(self) -> Optional[DistractionEvent]:
-        """25% chance per step to surface a rich NL distraction event."""
+        """Spawn a rich NL distraction event. Caller handles probability."""
         if self.pending_event is not None:
             return None   # one event at a time
-        if random.random() < 0.25:
-            raw = random.choice(EVENT_POOL)
-            event = DistractionEvent(
-                id=f"evt_{self.step_count}",
-                type=raw["type"],
-                description=raw["description"],
-                urgency=raw["urgency"],
-                can_defer=raw["can_defer"],
-                deadline_steps=raw.get("deadline_steps"),
-                correct_action=raw.get("correct_action", "focus"),
-            )
-            return event
-        return None
-    
+        raw = random.choice(EVENT_POOL)
+        event = DistractionEvent(
+            id=f"evt_{self.step_count}",
+            type=raw["type"],
+            description=raw["description"],
+            urgency=raw["urgency"],
+            can_defer=raw["can_defer"],
+            deadline_steps=raw.get("deadline_steps"),
+            correct_action=raw.get("correct_action", "focus"),
+        )
+        return event
+
     def _tick_event(self):
         """Age pending event. Penalise if it expires un-handled."""
         if self.pending_event and self.pending_event.deadline_steps is not None:
             self.pending_event.deadline_steps -= 1
             if self.pending_event.deadline_steps <= 0:
-                # Event expired
                 if not self.pending_event.can_defer:
                     self.deadlines_missed += 1
                 self.pending_event = None
@@ -327,13 +291,17 @@ class FocusFlowEnvironment:
         elif action_type == "adjust_energy":
             self.cognitive_load = max(0.0, self.cognitive_load - 0.10)
         self.max_cognitive_load = max(self.max_cognitive_load, self.cognitive_load)
-     #subtract 60 second everytime when it hits 0 
+
     def _advance_time(self):
+        """Advance simulation clock by one step (1 minute)."""
+        # FIX: Track focus seconds per step, not just per session
+        if self.current_phase == "focus":
+            self.total_focus_secs += SECONDS_PER_STEP
+
         self.time_remaining -= SECONDS_PER_STEP
         if self.time_remaining <= 0:
             if self.current_phase == "focus":
                 self.sessions_completed += 1
-                self.total_focus_secs += FOCUS_DURATION_SECONDS
                 # Mark relevant deadlines as completed
                 for dl in self.day_context.pending_deadlines:
                     if not dl["completed"] and dl["due_step"] <= self.step_count:
@@ -352,9 +320,9 @@ class FocusFlowEnvironment:
                 self.current_phase = "focus"
                 self.time_remaining = FOCUS_DURATION_SECONDS
                 self.active_distractions = self._sample_apps(2)
-     
+
     def _compute_reward(self, action: FocusAction) -> Tuple[float, str]:
-        reward   = 0.0
+        reward         = 0.0
         feedback_parts = []
 
         # ── 1. Reasoning quality (universal) ─────────────────────────────────
@@ -364,23 +332,28 @@ class FocusFlowEnvironment:
         self._last_reasoning_score = r_score
         self.reasoning_scores.append(r_score)
 
-        reasoning_bonus = (r_score - 0.5) * 0.20   # range: -0.10 to +0.10
+        # FIX: Stronger penalty for zero reasoning
+        if r_score == 0.0:
+            reasoning_bonus = -0.15
+            feedback_parts.append("⚠ No/spam reasoning: -0.15 hard penalty.")
+        else:
+            reasoning_bonus = (r_score - 0.5) * 0.20   # range: -0.10 to +0.10
+            if r_score < 0.3:
+                feedback_parts.append(f"⚠ Weak reasoning (score {r_score:.2f}): penalty applied.")
+            elif r_score > 0.7:
+                feedback_parts.append(f"✓ Good reasoning (score {r_score:.2f}): +bonus.")
+
         reward += reasoning_bonus
-        if r_score < 0.3:
-            feedback_parts.append(f"⚠ Weak reasoning (score {r_score:.2f}): -0.10 penalty.")
-        elif r_score > 0.7:
-            feedback_parts.append(f"✓ Good reasoning (score {r_score:.2f}): +0.10 bonus.")
 
         # ── 2. Action-specific rewards ────────────────────────────────────────
         atype = action.action_type
-         #focus — +0.05 × (1 − cognitive_load × 0.8)
+
         if atype == "focus":
             base = 0.05
-            # Cognitive load penalty: reward shrinks when overloaded
             base *= max(0.2, 1.0 - self.cognitive_load * 0.8)
             reward += base
             feedback_parts.append(f"Focused. Step reward: +{base:.3f} (load={self.cognitive_load:.2f}).")
-         
+
         elif atype == "block_app":
             if action.app_name and action.app_name not in self.apps_blocked:
                 app_obj = next((d for d in DISTRACTION_POOL if d.name == action.app_name), None)
@@ -400,17 +373,15 @@ class FocusFlowEnvironment:
 
         elif atype == "take_break":
             if self.current_phase == "focus" and self.time_remaining <= 120:
-                # Well-timed: within 2 min of session end
                 reward += 0.30
                 feedback_parts.append("Well-timed break at session boundary: +0.30.")
-                self.current_phase = "break"
+                self.current_phase  = "break"
                 self.time_remaining = SHORT_BREAK_SECONDS
                 self.breaks_taken  += 1
             elif self.cognitive_load > 0.75:
-                # Needed break due to high cognitive load
                 reward += 0.20
                 feedback_parts.append(f"Recovery break (load={self.cognitive_load:.2f}): +0.20.")
-                self.current_phase = "break"
+                self.current_phase  = "break"
                 self.time_remaining = SHORT_BREAK_SECONDS
                 self.breaks_taken  += 1
             elif self.current_phase == "break":
@@ -419,7 +390,7 @@ class FocusFlowEnvironment:
                 reward -= 0.10
                 feedback_parts.append("Premature break: -0.10.")
                 self.breaks_taken += 1
-        #whether I can defer this event or not it gives reward based on the differ of the events 
+
         elif atype == "defer_event":
             if self.pending_event:
                 if self.pending_event.can_defer:
@@ -436,13 +407,12 @@ class FocusFlowEnvironment:
                     feedback_parts.append("Cannot defer this event! -0.20 penalty.")
             else:
                 feedback_parts.append("No pending event to defer.")
-         #This event is urgent to do and take action urgently 
+
         elif atype == "respond_to_event":
             if self.pending_event:
                 correct = self.pending_event.correct_action == "respond_to_event"
                 r = 0.20 if correct else -0.10
                 reward += r
-                # Extra: score the response text quality
                 if action.response_text and len(action.response_text) > 15:
                     reward += 0.05
                     feedback_parts.append("Good response text: +0.05.")
@@ -456,10 +426,9 @@ class FocusFlowEnvironment:
 
         elif atype == "plan_day":
             if action.day_plan and len(action.day_plan) >= 2:
-                # Basic plan quality: does it mention sessions and breaks?
-                plan_text = " ".join(action.day_plan).lower()
-                has_sessions = "focus" in plan_text or "study" in plan_text or "session" in plan_text
-                has_breaks   = "break" in plan_text or "rest"  in plan_text
+                plan_text     = " ".join(action.day_plan).lower()
+                has_sessions  = "focus" in plan_text or "study" in plan_text or "session" in plan_text
+                has_breaks    = "break" in plan_text or "rest" in plan_text
                 has_deadlines = any(
                     dl["task"].lower().split()[0] in plan_text
                     for dl in self.day_context.pending_deadlines
@@ -473,7 +442,7 @@ class FocusFlowEnvironment:
             else:
                 reward -= 0.10
                 feedback_parts.append("Empty or trivial plan: -0.10.")
-         #If energy is less or cognitive load is greater than the given criteria reward else less reward for minor tasks  
+
         elif atype == "adjust_energy":
             if self.day_context.energy_level < 0.5 or self.cognitive_load > 0.6:
                 reward += 0.10
@@ -481,16 +450,15 @@ class FocusFlowEnvironment:
             else:
                 reward += 0.01
                 feedback_parts.append("Energy fine, minor action: +0.01.")
-         #It checks for app whether it is in the distraction apps or not if its not give none otherwise give -0.50 penalty 
+
         elif atype == "check_app":
             app = action.app_name or (
                 self.active_distractions[0] if self.active_distractions else None
             )
             if app:
                 reward -= 0.50
-                #Which app for checked for later analysis 
                 self.apps_checked.append(app)
-                self.total_distraction_s += 60#Adds 60 seconds when total time wasted on distractions 
+                self.total_distraction_s += 60
                 self.cognitive_load = min(1.0, self.cognitive_load + 0.10)
                 feedback_parts.append(f"Gave in to {app}: -0.50 hard penalty.")
             else:
@@ -506,10 +474,13 @@ class FocusFlowEnvironment:
             feedback_parts.append(f"Unknown action '{atype}': -0.05.")
 
         return reward, " | ".join(feedback_parts)
-   '''For each uncompleted deadline, it calculates how close you are to missing it. At 50+ steps away → pressure = 0.0. At 0 steps away → pressure=1.0.
-  Returns the highest pressure across all deadlines. 
-  This number appears in the observation so the LLM knows when to stop chatting and start studying.'''
+
     def _compute_deadline_pressure(self) -> float:
+        """
+        For each uncompleted deadline, calculates how close you are to missing it.
+        At 50+ steps away → pressure = 0.0. At 0 steps away → pressure = 1.0.
+        Returns the highest pressure across all deadlines.
+        """
         if not self.day_context.pending_deadlines:
             return 0.0
         pressures = []
@@ -527,22 +498,31 @@ class FocusFlowEnvironment:
     def reset(self) -> FocusObservation:
         self._reset_internal()
         return FocusObservation(
-            time_remaining_seconds = self.time_remaining,
-            current_phase          = self.current_phase,
-            active_distractions    = list(self.active_distractions),
-            blocked_apps           = list(self.apps_blocked),
-            sessions_completed     = 0,
-            focus_score            = 0.0,
-            pending_event          = None,
-            day_context            = self.day_context,
-            cognitive_load         = self.cognitive_load,
-            deadline_pressure      = self._compute_deadline_pressure(),
-            last_action_feedback   = f"Environment reset. Task: {self.task['description']}",
-            last_action_reward     = 0.0,
-            reasoning_quality_score= 0.0,
+            time_remaining_seconds  = self.time_remaining,
+            current_phase           = self.current_phase,
+            active_distractions     = list(self.active_distractions),
+            blocked_apps            = list(self.apps_blocked),
+            sessions_completed      = 0,
+            focus_score             = 0.0,
+            pending_event           = None,
+            day_context             = self.day_context,
+            cognitive_load          = self.cognitive_load,
+            deadline_pressure       = self._compute_deadline_pressure(),
+            last_action_feedback    = f"Environment reset. Task: {self.task['description']}",
+            last_action_reward      = 0.0,
+            reasoning_quality_score = 0.0,
         )
-        '''The main loop. Every call does this in order:'''
+
     def step(self, action: FocusAction) -> Tuple[FocusObservation, float, bool, dict]:
+        """
+        Main loop. Every call:
+        1. Advances time
+        2. Ticks pending event expiry
+        3. Updates cognitive load
+        4. Computes reward
+        5. Maybe spawns new event (probability controlled here)
+        6. Checks success/timeout
+        """
         if self.done:
             raise RuntimeError("Episode done. Call reset().")
 
@@ -556,12 +536,12 @@ class FocusFlowEnvironment:
         # Compute reward
         reward, feedback = self._compute_reward(action)
 
-        # Maybe spawn new event (higher chance at high cognitive load)
+        # FIX: Single probability check here (not doubled inside _maybe_spawn_event)
         spawn_chance = 0.25 + 0.15 * self.cognitive_load
         if self.pending_event is None and random.random() < spawn_chance:
             self.pending_event = self._maybe_spawn_event()
 
-        # Focus score
+        # Focus score — now updates every step
         focus_ratio = (
             self.total_focus_secs /
             max(1, self.total_focus_secs + self.total_distraction_s)
@@ -610,12 +590,12 @@ class FocusFlowEnvironment:
         )
 
         info = {
-            "step":            self.step_count,
-            "success":         success,
-            "timed_out":       timed_out,
-            "cumulative":      round(self.cumulative_reward, 4),
-            "deadlines_missed":self.deadlines_missed,
-            "reasoning_avg":   round(
+            "step":             self.step_count,
+            "success":          success,
+            "timed_out":        timed_out,
+            "cumulative":       round(self.cumulative_reward, 4),
+            "deadlines_missed": self.deadlines_missed,
+            "reasoning_avg":    round(
                 sum(self.reasoning_scores) / max(1, len(self.reasoning_scores)), 3
             ),
         }
@@ -624,20 +604,20 @@ class FocusFlowEnvironment:
 
     def state(self) -> FocusState:
         return FocusState(
-            episode_step             = self.step_count,
-            max_steps                = self.max_steps,
-            total_focus_seconds      = self.total_focus_secs,
-            total_distraction_seconds= self.total_distraction_s,
-            sessions_completed       = self.sessions_completed,
-            breaks_taken             = self.breaks_taken,
-            apps_blocked             = list(self.apps_blocked),
-            apps_checked             = list(self.apps_checked),
-            events_deferred          = list(self.events_deferred),
-            events_responded         = list(self.events_responded),
-            current_phase            = self.current_phase,
-            time_remaining_seconds   = self.time_remaining,
-            cumulative_reward        = round(self.cumulative_reward, 4),
-            day_context              = self.day_context,
-            cognitive_load           = round(self.cognitive_load, 3),
-            done                     = self.done,
+            episode_step              = self.step_count,
+            max_steps                 = self.max_steps,
+            total_focus_seconds       = self.total_focus_secs,
+            total_distraction_seconds = self.total_distraction_s,
+            sessions_completed        = self.sessions_completed,
+            breaks_taken              = self.breaks_taken,
+            apps_blocked              = list(self.apps_blocked),
+            apps_checked              = list(self.apps_checked),
+            events_deferred           = list(self.events_deferred),
+            events_responded          = list(self.events_responded),
+            current_phase             = self.current_phase,
+            time_remaining_seconds    = self.time_remaining,
+            cumulative_reward         = round(self.cumulative_reward, 4),
+            day_context               = self.day_context,
+            cognitive_load            = round(self.cognitive_load, 3),
+            done                      = self.done,
         )
