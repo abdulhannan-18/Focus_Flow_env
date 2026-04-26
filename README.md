@@ -4,8 +4,10 @@
 [![HuggingFace Space](https://img.shields.io/badge/🤗-HuggingFace%20Live%20API-yellow)](https://huggingface.co/spaces/hannan2859r/focusflow_env)
 [![Python 3.11](https://img.shields.io/badge/python-3.11-blue.svg)](https://www.python.org/downloads/release/python-3110/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](https://opensource.org/licenses/MIT)
-[![Google_colab](https://colab.research.google.com/drive/16wJ4mw6sdcTuOYABpdoV2AuO6_KYnc4Q?usp=sharing)
-[![Hugging_Face](https://huggingface.co/spaces/hannan2859r/focusflow_env)
+
+Links:
+Google_colab:(https://colab.research.google.com/drive/16wJ4mw6sdcTuOYABpdoV2AuO6_KYnc4Q?usp=sharing)
+Hugging_Face:(https://huggingface.co/spaces/hannan2859r/focusflow_env)
 
 > **Executive Summary:** FocusFlow is an OpenEnv-compliant reinforcement learning environment that simulates the cognitive friction of modern digital life. It abandons traditional spatial tasks (like moving a robot arm) in favor of **LLM-hard cognitive tasks**: managing mental energy, tracking shifting deadlines, and utilizing natural language comprehension to filter informal social distractions from urgent professional tasks.
 
