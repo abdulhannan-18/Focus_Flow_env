@@ -1,7 +1,6 @@
 # 🧠 FocusFlow: LLM-Hard RL Environment for Cognitive Management
 ### Meta × Scaler OpenEnv Hackathon 2026 — Grand Finale Submission
 
-[![Open in Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/abdulhannan-18/Focus_Flow_env/blob/main/training_colab.py)
 [![HuggingFace Space](https://img.shields.io/badge/🤗-HuggingFace%20Live%20API-yellow)](https://huggingface.co/spaces/hannan2859r/focusflow_env)
 [![Python 3.11](https://img.shields.io/badge/python-3.11-blue.svg)](https://www.python.org/downloads/release/python-3110/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](https://opensource.org/licenses/MIT)
@@ -131,9 +130,7 @@ curl -X POST http://localhost:7860/step \
 ```
 
 ---
-## Live Environment
-- API Docs: https://hannan2859r-focusflow-env.hf.space/docs
-- Health Check: https://hannan2859r-focusflow-env.hf.space/health
+
 
 ## 📁 Repository Architecture
 
