@@ -131,6 +131,9 @@ curl -X POST http://localhost:7860/step \
 ```
 
 ---
+## Live Environment
+- API Docs: https://hannan2859r-focusflow-env.hf.space/docs
+- Health Check: https://hannan2859r-focusflow-env.hf.space/health
 
 ## 📁 Repository Architecture
 
